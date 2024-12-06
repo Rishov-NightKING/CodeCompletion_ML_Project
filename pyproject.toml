@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "code_completion"
+version = "0.1.0"
+description = ""
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.12"
+numpy = "1.26.4"
+pandas = "2.2.3"
+matplotlib = "3.9.2"
+scikit-learn = "1.5.2"
+xtract = "0.1a3"
+black = "24.8.0"
+isort = "5.13.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
