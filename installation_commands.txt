@@ -1,0 +1,8 @@
+Steps to create conda environment and install packages in rivanna:
+
+1. module load miniforge cuda/12.4.1
+2. conda create --name myenv python=3.10
+3. source activate myenv
+4. mamba install pytorch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 pytorch-cuda=12.4 -c pytorch -c nvidia -y
+5. mamba install conda-forge::transformers -y
+6. mamba install -c conda-forge 'accelerate>=0.26.0'
