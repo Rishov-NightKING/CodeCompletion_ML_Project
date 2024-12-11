@@ -1,7 +1,16 @@
 import csv
 import os
+import sys
+
 import torch
-from constants import COMPLETION_PLACEHOLDER, COMPLETION_TYPE_REPR, END_GT, INSTRUCTION_TEMPLATE, OUTPUT_CSV_FILE_HEADER, START_GT
+from constants import (
+    COMPLETION_PLACEHOLDER,
+    COMPLETION_TYPE_REPR,
+    END_GT,
+    INSTRUCTION_TEMPLATE,
+    OUTPUT_CSV_FILE_HEADER,
+    START_GT,
+)
 from transformers import AutoModelForCausalLM, AutoTokenizer, NoBadWordsLogitsProcessor
 from utils import read_jsonl_file
 
@@ -60,6 +69,10 @@ class Incoder:
     def invoke(self, prompt: str) -> str:
         input_ids = self.tokenizer(prompt, truncation=True, return_tensors="pt").input_ids.to(self.model.device)
         input_ids_len = input_ids.shape[1]
+
+        if input_ids_len + 128 > self.max_length:
+            return None
+
         with torch.no_grad():
             generated_ids = self.model.generate(
                 input_ids,
@@ -99,6 +112,9 @@ def run_zero_shot(samples, completion_placeholder, output_file_path):
             prompt = "<|mask:0|>" + suffix + "<|mask:1|>" + "<|mask:0|>" + prefix
             completion = incoder_model.invoke(prompt)
 
+            if completion is None:
+                continue
+
             # Write row to CSV
             writer.writerow([sample["eval_prompt"], sample["ground_truth"], completion])
 
@@ -127,6 +143,9 @@ def run_few_shot(samples, completion_placeholder, instruction, output_file_path)
             # Generate completion
             completion = incoder_model.invoke(prompt)
 
+            if completion is None:
+                continue
+
             # Output results
             # print("\n")
             # print(f"Task ID: {sample['task_id']}")
@@ -148,19 +167,33 @@ def run_few_shot(samples, completion_placeholder, instruction, output_file_path)
 
 
 if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print(f"Usage: python {sys.argv[0]} <completion_type> <training_type>")
+        sys.exit(1)
+
+    possible_completion_types = COMPLETION_TYPE_REPR.keys()  # block, control, api
+    completion_type = sys.argv[1]
+    if completion_type not in possible_completion_types:
+        print(f"Wrong completion type. please select among {possible_completion_types}")
+        sys.exit(1)
+
+    possible_training_types = ["zero-shot", "few-shot"]
+    training_type = sys.argv[2]
+    if training_type not in possible_training_types:
+        print(f"Wrong training type. please select among {possible_training_types}")
+        sys.exit(1)
+
     # initialize the constants
     lang = "python"
-    model_name = "facebook/incoder-1B"
-    # model_name = "facebook/incoder-6B"
-    # # change needed for different types
-    completion_type = "block"
+    parameters = "6B"
+    model_name = f"facebook/incoder-{parameters}"
     block_comments = False
     model_max_length = 2048
 
     # initiliaze the model
     incoder_model = Incoder(model_name, model_max_length, block_comments)
     # read the dataset
-    input_file_path = "../Dataset/processed_safim_few_shot/api_completion_processed_few_shot.jsonl"
+    input_file_path = f"../Dataset/processed_safim_few_shot/{completion_type}_completion_processed_few_shot.jsonl"
     python_samples = read_jsonl_file(input_file_path, "python")
 
     completion_placeholder = COMPLETION_PLACEHOLDER[lang]
@@ -168,16 +201,18 @@ if __name__ == "__main__":
     output_file_name = os.path.basename(input_file_path).split(".jsonl")[0] + "_output.csv"
 
     ######################## ZERO SHOT #############################
-    zero_shot_result_dir = "../Results/incoder/zero-shot"
-    zero_shot_output_file_path = os.path.join(zero_shot_result_dir, output_file_name)
-    os.makedirs(zero_shot_result_dir, exist_ok=True)
+    if training_type == "zero-shot":
+        zero_shot_result_dir = f"../Results/incoder-{parameters}/zero-shot"
+        zero_shot_output_file_path = os.path.join(zero_shot_result_dir, output_file_name)
+        os.makedirs(zero_shot_result_dir, exist_ok=True)
 
-    # run_zero_shot(python_samples, completion_placeholder, zero_shot_output_file_path)
+        run_zero_shot(python_samples, completion_placeholder, zero_shot_output_file_path)
 
     ######################## FEW SHOT ################################
-    few_shot_result_dir = "../Results/incoder/few-shot"
-    few_shot_output_file_path = os.path.join(few_shot_result_dir, output_file_name)
-    os.makedirs(few_shot_result_dir, exist_ok=True)
+    if training_type == "few-shot":
+        few_shot_result_dir = f"../Results/incoder-{parameters}/few-shot"
+        few_shot_output_file_path = os.path.join(few_shot_result_dir, output_file_name)
+        os.makedirs(few_shot_result_dir, exist_ok=True)
 
-    instruction = INSTRUCTION_TEMPLATE.render(placeholder=completion_placeholder, completion_type=completion_type)
-    run_few_shot(python_samples, completion_placeholder, instruction, few_shot_output_file_path)
+        instruction = INSTRUCTION_TEMPLATE.render(placeholder=completion_placeholder, completion_type=completion_type)
+        run_few_shot(python_samples, completion_placeholder, instruction, few_shot_output_file_path)
