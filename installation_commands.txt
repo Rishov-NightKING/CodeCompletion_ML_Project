@@ -18,3 +18,7 @@
 ## if you want to delete a conda environment
 1. conda remove -n myenv --all
 2. You may also remove the current environment files in /.conda/pkgs
+
+#for codebleu
+pip install codebleu==0.6.1
+pip install tree-sitter-python==0.23.0
