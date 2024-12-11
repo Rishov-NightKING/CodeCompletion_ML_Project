@@ -11,6 +11,7 @@ from constants import (
     OUTPUT_CSV_FILE_HEADER,
     START_GT,
 )
+from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, NoBadWordsLogitsProcessor
 from utils import read_jsonl_file
 
@@ -107,7 +108,7 @@ def run_zero_shot(samples, completion_placeholder, output_file_path):
         writer = csv.writer(file)
         # Write header line
         writer.writerow(OUTPUT_CSV_FILE_HEADER)
-        for sample in samples:
+        for sample in tqdm(samples, desc="Processing Samples"):
             prefix, suffix = sample["prompt"].split(completion_placeholder)
             prompt = "<|mask:0|>" + suffix + "<|mask:1|>" + "<|mask:0|>" + prefix
             completion = incoder_model.invoke(prompt)
@@ -125,15 +126,16 @@ def run_few_shot(samples, completion_placeholder, instruction, output_file_path)
         writer = csv.writer(file)
         # Write header line
         writer.writerow(OUTPUT_CSV_FILE_HEADER)
-        for sample in samples:
+        count = 0
+        for sample in tqdm(samples, desc="Processing Samples"):
             examples = sample["few_shot_examples"]
             few_shot_prompt = ""
-            for example in examples:
+            for example in examples[:1]:  # only take 1 example
                 few_shot_prompt += (
                     f"{example['prompt']}\n"
                     f"{instruction}\n"
                     f"{START_GT}\n"
-                    f"{example['ground_truth']}\n\n"
+                    f"{example['ground_truth']}\n"
                     f"{END_GT}\n"
                 )
 
@@ -144,6 +146,7 @@ def run_few_shot(samples, completion_placeholder, instruction, output_file_path)
             completion = incoder_model.invoke(prompt)
 
             if completion is None:
+                count += 1
                 continue
 
             # Output results
@@ -157,13 +160,17 @@ def run_few_shot(samples, completion_placeholder, instruction, output_file_path)
                 filtered_completion = completion.split(START_GT)[1].split(END_GT)[0].strip()
             elif END_GT in completion:
                 filtered_completion = completion.split(END_GT)[0].strip()
+            elif START_GT in completion:
+                filtered_completion = completion.split(START_GT)[1].strip()
             else:
                 filtered_completion = completion
 
             # Write row to CSV
             writer.writerow([sample["eval_prompt"], sample["ground_truth"], filtered_completion])
 
-        # print("Model Output: ", filtered_completion)
+            # print("Model Output: ", filtered_completion)
+
+        print(f"total skipped: {count}")
 
 
 if __name__ == "__main__":
@@ -187,10 +194,10 @@ if __name__ == "__main__":
     lang = "python"
     parameters = "6B"
     model_name = f"facebook/incoder-{parameters}"
-    block_comments = False
+    block_comments = True
     model_max_length = 2048
 
-    # initiliaze the model
+    # initialize the model
     incoder_model = Incoder(model_name, model_max_length, block_comments)
     # read the dataset
     input_file_path = f"../Dataset/processed_safim_few_shot/{completion_type}_completion_processed_few_shot.jsonl"
