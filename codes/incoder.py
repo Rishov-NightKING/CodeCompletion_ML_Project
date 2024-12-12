@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
     ######################## ZERO SHOT #############################
     if training_type == "zero-shot":
-        zero_shot_result_dir = f"../Results/incoder-{parameters}/zero-shot"
+        zero_shot_result_dir = f"../results/incoder-{parameters}/zero-shot"
         zero_shot_output_file_path = os.path.join(zero_shot_result_dir, output_file_name)
         os.makedirs(zero_shot_result_dir, exist_ok=True)
 
@@ -217,7 +217,7 @@ if __name__ == "__main__":
 
     ######################## FEW SHOT ################################
     if training_type == "few-shot":
-        few_shot_result_dir = f"../Results/incoder-{parameters}/few-shot"
+        few_shot_result_dir = f"../results/incoder-{parameters}/few-shot"
         few_shot_output_file_path = os.path.join(few_shot_result_dir, output_file_name)
         os.makedirs(few_shot_result_dir, exist_ok=True)
 
