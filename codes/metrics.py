@@ -55,17 +55,34 @@ def codebleu(df):
 
         code_bleu_total += code_bleu_score["codebleu"]
 
-    return (code_bleu_total/total_rows)
+    return code_bleu_total / total_rows
 
 
+results_dir = "../Results"
 
+for root, dirs, files in os.walk(results_dir):
+    for file in files:
+        if file.endswith(".csv"):
+            file_path = os.path.join(root, file)
+            path_parts = root.split(os.sep)
 
-exact_match_accuracy=exact_match(df)
-print(f"\nExact Match Accuracy: {exact_match_accuracy:.2f}%")
-match_if_contains_accuracy=match_if_contains(df)
-print(f"\nMatch if Contains Accuracy: {match_if_contains_accuracy:.2f}%")
+            if len(path_parts) >= 2:
+                model_name = path_parts[-2]
+                shot_type = path_parts[-1]
+            else:
+                model_name = "unknown_model"
+                shot_type = "unknown_shot_type"
 
-code_bleu_accuracy=codebleu(df)
-print(f"\nCode BLEU accuracy: {code_bleu_accuracy:.2f}")
+            # Read the CSV file into a DataFrame
+            df = pd.read_csv(file_path)
+
+            # Print the results
+            print(f"Model: {model_name}, Training Type: {shot_type}, File: {file}")
+            exact_match_accuracy = exact_match(df)
+            print(f"Exact Match Accuracy: {exact_match_accuracy:.2f}%")
+            match_if_contains_accuracy = match_if_contains(df)
+            print(f"Match if Contains Accuracy: {match_if_contains_accuracy:.2f}%")
+            code_bleu_accuracy = codebleu(df)
+            print(f"Code BLUE accuracy: {code_bleu_accuracy:.2f}\n\n")
 
 
