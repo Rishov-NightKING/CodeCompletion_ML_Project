@@ -13,53 +13,27 @@ from constants import (
 )
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, NoBadWordsLogitsProcessor
+from transformers.generation.logits_process import NoBadWordsLogitsProcessor
 from utils import read_jsonl_file
 
 
-class Incoder:
+class StarcoderModel:
     def __init__(self, model_name, max_length, block_comments=False):
-        assert model_name.startswith("facebook/incoder")
+        assert model_name.startswith("bigcode/starcoder")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer.model_max_length = max_length
+        # Ensure pad_token is set
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
         self.max_length = max_length
         device = torch.device("cuda")
-        if model_name.endswith("6B"):
-            self.model = AutoModelForCausalLM.from_pretrained(
-                model_name, revision="float16", torch_dtype=torch.float16, low_cpu_mem_usage=True
-            ).to(device)
-        else:
-            self.model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name, torch_dtype=torch.float16, low_cpu_mem_usage=True
+        ).to(device)
         self.logits_processor = (
             [
                 NoBadWordsLogitsProcessor(
-                    [
-                        [word_idx]
-                        for word_idx in self.tokenizer.convert_tokens_to_ids(
-                            [
-                                "#Ġ",
-                                "/*Ġ",
-                                "Ġ#Ġ",
-                                "ĠĠ#Ġ",
-                                "ĠĠ/*Ġ",
-                                "ĠĠĠ#Ġ",
-                                "ĠĠĠ/*Ġ",
-                                "ĠĠĠĠ#Ġ",
-                                "ĠĠĠĠ/*Ġ",
-                                "ĠĠĠĠĠ#Ġ",
-                                "ĠĠĠĠĠĠ#Ġ",
-                                "ĠĠĠĠĠĠ/*Ġ",
-                                "ĠĠĠĠĠĠĠ#Ġ",
-                                "ĠĠĠĠĠĠĠĠ#Ġ",
-                                "ĠĠĠĠĠĠĠĠ/*Ġ",
-                                "ĠĠĠĠĠĠĠĠĠ#Ġ",
-                                "ĠĠĠĠĠĠĠĠĠĠ#Ġ",
-                                "ĠĠĠĠĠĠĠĠĠĠĠ#Ġ",
-                                "ĠĠĠĠĠĠĠĠĠĠĠĠ#Ġ",
-                                "ĠĠĠĠĠĠĠĠĠĠĠĠĠ#Ġ",
-                                "ĠĠĠĠĠĠĠĠĠĠĠĠĠĠ#Ġ",
-                                "ĠĠĠĠĠĠĠĠĠĠĠĠĠĠĠĠ#Ġ",
-                            ]
-                        )
-                    ],
+                    [[word_idx] for word_idx in self.tokenizer.convert_tokens_to_ids(["#", "Ġ#", "/*", "Ġ/*"])],
                     self.tokenizer.eos_token_id,
                 )
             ]
@@ -68,38 +42,29 @@ class Incoder:
         )
 
     def invoke(self, prompt: str) -> str:
-        input_ids = self.tokenizer(prompt, truncation=True, return_tensors="pt").input_ids.to(self.model.device)
+        input_data = self.tokenizer(prompt, truncation=True, return_tensors="pt", padding=True)
+        input_ids = input_data.input_ids.to(self.model.device)
         input_ids_len = input_ids.shape[1]
 
         if input_ids_len + 128 > self.max_length:
             return None
 
+        attention_mask = input_data.attention_mask.to(self.model.device)
+
         with torch.no_grad():
             generated_ids = self.model.generate(
                 input_ids,
+                attention_mask=attention_mask,
                 do_sample=True,
                 num_return_sequences=1,
                 temperature=0.2,
                 max_length=min(input_ids_len + 128, self.max_length),
                 top_p=0.95,
                 logits_processor=self.logits_processor,
+                pad_token_id=self.tokenizer.pad_token_id,
             )
-        generated_text = self.tokenizer.decode(generated_ids[0, input_ids_len:], clean_up_tokenization_spaces=False)
-        EOM = "<|endofmask|>"
-        if EOM not in generated_text:
-            generated_text += EOM
-        return generated_text[: generated_text.index(EOM)]
-
-    @staticmethod
-    def make_sentinel(i):
-        # signals (1) a location to insert an infill and (2) the start of the infill generation
-        return f"<|mask:{i}|>"
-
-    def assemble_infilling_prompt(self, prefix: str, suffix: str, reverse: bool = False) -> str:
-        if reverse:
-            return prefix + self.make_sentinel(0) + suffix + self.make_sentinel(1) + self.make_sentinel(0)
-        else:
-            return self.make_sentinel(0) + suffix + self.make_sentinel(1) + self.make_sentinel(0) + prefix
+        generated_text = self.tokenizer.decode(generated_ids[0, input_ids_len:], skip_special_tokens=True)
+        return generated_text
 
 
 def run_zero_shot(samples, completion_placeholder, output_file_path):
@@ -110,11 +75,14 @@ def run_zero_shot(samples, completion_placeholder, output_file_path):
         writer.writerow(OUTPUT_CSV_FILE_HEADER)
         for sample in tqdm(samples, desc="Processing Samples"):
             prefix, suffix = sample["prompt"].split(completion_placeholder)
-            prompt = "<|mask:0|>" + suffix + "<|mask:1|>" + "<|mask:0|>" + prefix
+            prompt = "<fim_prefix>" + prefix + "<fim_suffix>" + suffix + "<fim_middle>"
             completion = incoder_model.invoke(prompt)
 
             if completion is None:
                 continue
+
+            # print(f"ground truth: {sample['ground_truth']}")
+            # print(f"model output: {completion}")
 
             # Write row to CSV
             writer.writerow([sample["eval_prompt"], sample["ground_truth"], completion])
@@ -155,6 +123,7 @@ def run_few_shot(samples, completion_placeholder, instruction, output_file_path)
             # print("Prompt: ", prompt)
             # print(f"example: {count}\n")
             # print("Ground Truth: ", sample["ground_truth"])
+            # print("Model Output: ", completion)
 
             if START_GT in completion and END_GT in completion:
                 filtered_completion = completion.split(START_GT)[1].split(END_GT)[0].strip()
@@ -168,7 +137,7 @@ def run_few_shot(samples, completion_placeholder, instruction, output_file_path)
             # Write row to CSV
             writer.writerow([sample["eval_prompt"], sample["ground_truth"], filtered_completion])
 
-            # print("Model Output: ", filtered_completion)
+            # print("Model filtered Output: ", filtered_completion)
 
         print(f"total skipped: {count}")
 
@@ -192,13 +161,12 @@ if __name__ == "__main__":
 
     # initialize the constants
     lang = "python"
-    parameters = "6B"
-    model_name = f"facebook/incoder-{parameters}"
+    model_name = "bigcode/starcoder"
     block_comments = True
     model_max_length = 2048
 
-    # initialize the model
-    incoder_model = Incoder(model_name, model_max_length, block_comments)
+    # initiliaze the model
+    incoder_model = StarcoderModel(model_name, model_max_length, block_comments)
     # read the dataset
     input_file_path = f"../Dataset/processed_safim_few_shot/{completion_type}_completion_processed_few_shot.jsonl"
     python_samples = read_jsonl_file(input_file_path, "python")
@@ -209,7 +177,7 @@ if __name__ == "__main__":
 
     ######################## ZERO SHOT #############################
     if training_type == "zero-shot":
-        zero_shot_result_dir = f"../results/incoder-{parameters}/zero-shot"
+        zero_shot_result_dir = f"../results/starcoder/zero-shot"
         zero_shot_output_file_path = os.path.join(zero_shot_result_dir, output_file_name)
         os.makedirs(zero_shot_result_dir, exist_ok=True)
 
@@ -217,7 +185,7 @@ if __name__ == "__main__":
 
     ######################## FEW SHOT ################################
     if training_type == "few-shot":
-        few_shot_result_dir = f"../results/incoder-{parameters}/few-shot"
+        few_shot_result_dir = f"../results/starcoder/few-shot"
         few_shot_output_file_path = os.path.join(few_shot_result_dir, output_file_name)
         os.makedirs(few_shot_result_dir, exist_ok=True)
 
