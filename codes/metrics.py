@@ -65,6 +65,6 @@ match_if_contains_accuracy=match_if_contains(df)
 print(f"\nMatch if Contains Accuracy: {match_if_contains_accuracy:.2f}%")
 
 code_bleu_accuracy=codebleu(df)
-print(f"\nCode BLUE accuracy: {code_bleu_accuracy:.2f}")
+print(f"\nCode BLEU accuracy: {code_bleu_accuracy:.2f}")
 
 
